@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Multi-Tenant Application</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Multi-Tenant Application Demo</h1>
+        
+        <div class="tenant-selector">
+            <h2>Select a tenant:</h2>
+            <div class="tenant-buttons">
+                <button onclick="navigateToTenant('tenant1')">Tenant 1</button>
+                <button onclick="navigateToTenant('tenant2')">Tenant 2</button>
+                <button onclick="navigateToTenant('tenant3')">Tenant 3</button>
+            </div>
+            
+            <div class="tenant-create">
+                <h2>Create a new tenant:</h2>
+                <input type="text" id="new-tenant" placeholder="Enter tenant ID">
+                <button onclick="createTenant()">Create & Navigate</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function navigateToTenant(tenantId) {
+            // For local development
+            window.location.href = `http://${tenantId}.localhost:8080`;
+        }
+        
+        function createTenant() {
+            const tenantId = document.getElementById('new-tenant').value;
+            if (tenantId) {
+                // In a real app, you'd make an API call here
+                fetch('/api/tenants', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ id: tenantId }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        navigateToTenant(tenantId);
+                    }
+                });
+            }
+        }
+    </script>
+</body>
+</html>

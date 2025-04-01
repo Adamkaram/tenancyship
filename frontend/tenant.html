@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tenant Portal</title>
+</head>
+<body>
+    <h1>Welcome to Tenant Portal</h1>
+    <div id="tenant-info"></div>
+    
+    <script>
+        // Get tenant info
+        fetch('/tenant-info')
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('tenant-info').textContent = data;
+            });
+    </script>
+    
+    <p><a href="http://localhost:8080">Return to main page</a></p>
+</body>
+</html>
