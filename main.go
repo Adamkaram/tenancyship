@@ -21,6 +21,10 @@ type Tenant struct {
 // Global database connection
 var db *sql.DB
 
+type TenantService struct {
+	BaseURL string
+}
+
 func init() {
 	// Database connection parameters
 	connStr := "postgres://username:password@localhost:5432/tenants_db?sslmode=disable"
@@ -48,49 +52,92 @@ func init() {
 	}
 }
 
+func NewTenantService() *TenantService {
+	baseURL := getenv("TENANT_SERVICE_URL", "http://localhost:8080")
+	return &TenantService{BaseURL: baseURL}
+}
+
+func (ts *TenantService) GetTenant(id string) (*Tenant, error) {
+	resp, err := http.Get(fmt.Sprintf("%s/tenants/%s", ts.BaseURL, id))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+
+	var tenant Tenant
+	if err := json.NewDecoder(resp.Body).Decode(&tenant); err != nil {
+		return nil, err
+	}
+	return &tenant, nil
+}
+
+func (ts *TenantService) ListTenants() ([]Tenant, error) {
+	resp, err := http.Get(fmt.Sprintf("%s/tenants", ts.BaseURL))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var tenants []Tenant
+	if err := json.NewDecoder(resp.Body).Decode(&tenants); err != nil {
+		return nil, err
+	}
+	return tenants, nil
+}
+
 func main() {
+	tenantService := NewTenantService()
 	r := mux.NewRouter()
 
 	// API routes
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/tenants", getTenantsList).Methods("GET")
 	api.HandleFunc("/tenants", createTenant).Methods("POST")
-	
+
 	// Tenant-specific routes
 	r.HandleFunc("/tenant-info", tenantInfoHandler)
-	
+
 	// Move the subdomain handling to the main router
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
-		
+
 		// تقسيم العنوان لاستبعاد رقم المنفذ إذا وجد
 		hostParts := strings.Split(host, ":")
 		hostWithoutPort := hostParts[0]
-		
+
 		// استخراج معرف المستأجر
 		tenantID := strings.Split(hostWithoutPort, ".")[0]
-		
+
 		fmt.Println("Host:", host, "Host without port:", hostWithoutPort, "TenantID:", tenantID) // للتصحيح
-		
+
 		// إذا كان المسار الرئيسي
 		if tenantID == "localhost" || tenantID == "127.0.0.1" {
 			http.ServeFile(w, r, "frontend/index.html")
 			return
 		}
-		
+
 		// التحقق من وجود المستأجر
-		if _, exists := tenants[tenantID]; !exists {
-			fmt.Fprintf(w, "Tenant '%s' not found. Available tenants: tenant1, tenant2, tenant3", tenantID)
+		tenant, err := tenantService.GetTenant(tenantID)
+		if err != nil {
+			http.Error(w, "Error fetching tenant", http.StatusInternalServerError)
 			return
 		}
-		
+		if tenant == nil {
+			fmt.Fprintf(w, "Tenant '%s' not found", tenantID)
+			return
+		}
+
 		// تقديم واجهة المستأجر
 		http.ServeFile(w, r, "frontend/tenant.html")
 	})
 	// Serve static files
 	fs := http.FileServer(http.Dir("./frontend"))
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", fs))
-	
+
 	// Use the router as the main handler
 	fmt.Println("Server starting on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
@@ -103,7 +150,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 func tenantInfoHandler(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	tenantID := strings.Split(host, ".")[0]
-				
+
 	var tenant Tenant
 	err := db.QueryRow("SELECT id, name FROM tenants WHERE id = $1", tenantID).Scan(&tenant.ID, &tenant.Name)
 	if err == nil {

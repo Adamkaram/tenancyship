@@ -1,0 +1,10 @@
+[package]
+name = "tenant-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4.4"
+serde = { version = "1.0", features = ["derive"] }
+surrealdb = { version = "1.0.0", features = ["kv-rocksdb"] }
+tokio = { version = "1.0", features = ["full"] } 
