@@ -15,5 +15,6 @@ podman-compose down --volumes
 podman system prune -f
 
 # Build and run with podman-compose
-podman-compose up --build
+podman-compose build --no-cache
+podman-compose up
 

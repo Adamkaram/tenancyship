@@ -1,29 +1,24 @@
 version: '3.8'
 
 services:
-  surrealdb:
-    image: docker.io/surrealdb/surrealdb:latest
-    ports:
-      - "8000:8000"
-    command: start --user root --pass root
-    volumes:
-      - surreal-data:/data
-
   tenant-service:
-    build: ./tenant-service
+    build: 
+      context: ./tenant-service
+      dockerfile: Dockerfile
+    image: tenant-service:latest
     ports:
       - "8080:8080"
-    depends_on:
-      - surrealdb
+    env_file:
+      - ./tenant-service/.env
 
   main-app:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: main-app:latest
     ports:
       - "3000:8080"
     environment:
       - TENANT_SERVICE_URL=http://tenant-service:8080
     depends_on:
       - tenant-service
-
-volumes:
-  surreal-data: 

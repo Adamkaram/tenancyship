@@ -1,0 +1,63 @@
+# Rust build artifacts
+/target/
+/tenant-service/target/
+**/*.rs.bk
+Cargo.lock
+
+# Environment variables
+.env
+.env.*
+!.env.example
+.venv/
+/tenant-service/.env
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+*~
+
+# Debug files
+*.pdb
+*.exp
+*.lib
+*.obj
+
+# SurrealDB local database files
+*.db
+*.log
+**/*.surql
+
+# Podman and Docker files
+.volumes/
+.podman/
+.container/
+
+# Build and dependency directories
+/build/
+/dist/
+/node_modules/
+
+# Log files
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Generated documentation
+/doc/
+/docs/
+/book/
+
+# Testing artifacts
+/coverage/
+/.nyc_output/
