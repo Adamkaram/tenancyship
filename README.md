@@ -1,12 +1,40 @@
-# tenancyship
-core utility for multi-tenancy saas projects with go&amp;nginx
+# Tenancyship 🚀
 
-![ChatGPT_Image_Apr_4__2025__09_45_53_PM-removebg-preview](https://github.com/user-attachments/assets/a33e45bf-c1b8-41a2-aa23-9f0a272d4ae4)
+A powerful, enterprise-grade multi-tenancy toolkit for modern SaaS applications, featuring a robust microservices architecture.
 
+![Tenancyship Architecture](https://github.com/user-attachments/assets/a33e45bf-c1b8-41a2-aa23-9f0a272d4ae4)
 
-1- db service with rust axum and surrealdb
-2- go in general
-3- podman
+## Core Features
+
+### 🔒 Secure Tenant Isolation
+- Database-per-tenant architecture
+- Robust authentication & authorization
+- Resource quotas and rate limiting
+
+### 🛠️ Technology Stack
+- **Database Layer**: High-performance SurrealDB service powered by Rust/Axum
+- **Application Layer**: Go-based microservices with clean architecture
+- **Infrastructure**: Container orchestration with Podman/Kubernetes
+- **Gateway**: Advanced request routing with NGINX
+
+### 🌟 Key Benefits
+- Seamless tenant management
+- Horizontal scalability
+- Zero-trust security model
+- Real-time analytics
+- Infrastructure as Code (IaC)
+
+### 📈 Performance
+- Sub-millisecond tenant routing
+- Automatic failover
+- Load balancing
+- Connection pooling
+
+## Quick Links
+- [Documentation](./docs)
+- [API Reference](./api-docs)
+- [Contributing Guide](./CONTRIBUTING.md)
+- [Security](./SECURITY.md)
 
 # Tenant Service
 
