@@ -1,7 +1,7 @@
 # tenancyship
 core utility for multi-tenancy saas projects with go&amp;nginx
 
-![ChatGPT Image Apr 4, 2025, 09_45_53 PM](https://github.com/user-attachments/assets/8aad14e9-baed-4119-a3a9-4cc58a68636b)
+![ChatGPT_Image_Apr_4__2025__09_45_53_PM-removebg-preview](https://github.com/user-attachments/assets/a33e45bf-c1b8-41a2-aa23-9f0a272d4ae4)
 
 
 1- db service with rust axum and surrealdb
