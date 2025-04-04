@@ -61,3 +61,50 @@ yarn-error.log*
 # Testing artifacts
 /coverage/
 /.nyc_output/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform/secrets/dev.tfvars
+terraform/secrets/prod.tfvars
+terraform.tfvars
+# Allow template
+!terraform/secrets/template.tfvars
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build
+target/
+**/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Kubernetes
+k8s/secrets/
+k8s/deployment.yaml
+k8s/service.yaml
+
+
+# Terraform secrets
+terraform/secrets/dev.tfvars
+terraform/secrets/prod.tfvars
+terraform/secrets/*.tfvars
+!terraform/secrets/template.tfvars

@@ -1,40 +1,44 @@
-FROM rust:1.81-slim as builder
-WORKDIR /usr/src/app
+# Use cargo-chef to plan dependencies
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+WORKDIR /app
 
-# Install build dependencies
+# Plan the dependencies
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Build the dependencies and application
+FROM chef AS builder 
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Build application
+COPY . .
+RUN cargo build --release --bin tenant-service
+
+# Runtime stage
+FROM debian:bookworm-slim AS runtime
+WORKDIR /app
+
+# Install necessary runtime libraries
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    libclang-dev \
-    clang \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a new empty shell project
-RUN cargo init
+# Copy the binary
+COPY --from=builder /app/target/release/tenant-service /usr/local/bin
 
-# Copy only the dependency files first
-COPY Cargo.toml Cargo.lock ./
+# Create and use non-root user
+RUN useradd -ms /bin/bash nonroot
+USER nonroot
 
-# Build dependencies - this layer will be cached
-RUN cargo build --release
-    
-# Now copy the source code
-COPY src src/
-
-# Build the application
-RUN touch src/main.rs && cargo build --release
-
-FROM gcr.io/distroless/base-debian12
-COPY --from=builder /usr/src/app/target/release/tenant-service /usr/local/bin/
-COPY .env /usr/local/bin/
-WORKDIR /usr/local/bin
-
-# Add non-root user permissions
-USER nonroot:nonroot
-
+# Expose the port
 EXPOSE 8080
 
-# Add health check
+# Health check
 HEALTHCHECK --interval=30s --timeout=3s \
-    CMD ["/usr/local/bin/tenant-service", "--health-check"] || exit 1
+    CMD curl -f http://localhost:8080/ || exit 1
 
-CMD ["/usr/local/bin/tenant-service"] 
+# Run the service
+CMD ["/usr/local/bin/tenant-service"]

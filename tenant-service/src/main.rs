@@ -6,12 +6,74 @@ use axum::{
 use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs;
 use std::net::SocketAddr;
 use surrealdb::engine::any::{self, Any};
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
+use serde_json::Value;
+
+// Configuration struct for secrets management
+#[derive(Debug, Deserialize)]
+struct Config {
+    surrealdb_url: String,
+    surrealdb_user: String,
+    surrealdb_pass: String,
+    surrealdb_ns: String,
+    surrealdb_db: String,
+}
+
+impl Config {
+    fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Config {
+            surrealdb_url: env::var("SURREALDB_URL")?,
+            surrealdb_user: env::var("SURREALDB_USER")?,
+            surrealdb_pass: env::var("SURREALDB_PASS")?,
+            surrealdb_ns: env::var("SURREALDB_NS")?,
+            surrealdb_db: env::var("SURREALDB_DB")?,
+        })
+    }
+
+    fn from_k8s_secrets() -> Result<Self, Box<dyn std::error::Error>> {
+        // In Kubernetes, secrets are mounted at /mnt/secrets/surrealdb-creds/
+        const SECRET_PATH: &str = "/mnt/secrets/surrealdb-creds";
+        
+        Ok(Config {
+            surrealdb_url: fs::read_to_string(format!("{}/SURREALDB_URL", SECRET_PATH))?.trim().to_string(),
+            surrealdb_user: fs::read_to_string(format!("{}/SURREALDB_USER", SECRET_PATH))?.trim().to_string(),
+            surrealdb_pass: fs::read_to_string(format!("{}/SURREALDB_PASS", SECRET_PATH))?.trim().to_string(),
+            surrealdb_ns: fs::read_to_string(format!("{}/SURREALDB_NS", SECRET_PATH))?.trim().to_string(),
+            surrealdb_db: fs::read_to_string(format!("{}/SURREALDB_DB", SECRET_PATH))?.trim().to_string(),
+        })
+    }
+
+    async fn from_vault() -> Result<Self, Box<dyn std::error::Error>> {
+        let vault_addr = env::var("VAULT_ADDR")?;
+        let vault_token = env::var("VAULT_TOKEN")?;
+        
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{}/v1/surrealdb/data/tenant-service", vault_addr))
+            .header("X-Vault-Token", vault_token)
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+
+        let data = response["data"]["data"].as_object()
+            .ok_or("Invalid Vault response format")?;
+
+        Ok(Config {
+            surrealdb_url: data["url"].as_str().unwrap_or("").to_string(),
+            surrealdb_user: data["user"].as_str().unwrap_or("").to_string(),
+            surrealdb_pass: data["password"].as_str().unwrap_or("").to_string(),
+            surrealdb_ns: data["ns"].as_str().unwrap_or("").to_string(),
+            surrealdb_db: data["db"].as_str().unwrap_or("").to_string(),
+        })
+    }
+}
 
 // Error handling module
 mod error {
@@ -89,7 +151,6 @@ mod routes {
         Path(id): Path<String>,
         Json(mut tenant): Json<Tenant>,
     ) -> Result<Json<Tenant>, Error> {
-        // Ensure the ID in path matches the tenant ID
         tenant.id = id.clone();
         
         let created: Option<Tenant> = db
@@ -127,7 +188,6 @@ mod routes {
         Path(id): Path<String>,
         Json(mut tenant_data): Json<Tenant>,
     ) -> Result<Json<Tenant>, Error> {
-        // Ensure the ID stays the same
         tenant_data.id = id.clone();
         
         let tenant: Option<Tenant> = db
@@ -156,28 +216,41 @@ mod routes {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv().ok();
+    // Load configuration based on environment
+    let config = if let Ok(env_type) = env::var("ENVIRONMENT_TYPE") {
+        match env_type.as_str() {
+            "kubernetes" => {
+                println!("Running in Kubernetes, loading secrets from mounted files");
+                Config::from_k8s_secrets()?
+            },
+            "vault" => {
+                println!("Loading secrets from Vault");
+                Config::from_vault().await?
+            },
+            _ => {
+                println!("Loading configuration from environment variables");
+                Config::from_env()?
+            }
+        }
+    } else {
+        println!("No ENVIRONMENT_TYPE set, defaulting to environment variables");
+        dotenv().ok();  // Load .env file if available
+        Config::from_env()?
+    };
     
-    // Get connection details from environment
-    let db_url = env::var("SURREALDB_URL").expect("SURREALDB_URL must be set");
-    let db_user = env::var("SURREALDB_USER").expect("SURREALDB_USER must be set");
-    let db_pass = env::var("SURREALDB_PASS").expect("SURREALDB_PASS must be set");
-    let db_ns = env::var("SURREALDB_NS").expect("SURREALDB_NS must be set");
-    let db_db = env::var("SURREALDB_DB").expect("SURREALDB_DB must be set");
+    println!("Connecting to SurrealDB at {}", config.surrealdb_url);
     
-    println!("Connecting to SurrealDB at {}", db_url);
+    // Initialize database connection
+    let db = any::connect(&config.surrealdb_url).await?;
     
-    // Open a connection using the "any" engine
-    let db = any::connect(db_url).await?;
-    
-    // Sign in as root
+    // Sign in
     db.signin(Root {
-        username: &db_user,
-        password: &db_pass,
+        username: &config.surrealdb_user,
+        password: &config.surrealdb_pass,
     }).await?;
     
     // Select namespace and database
-    db.use_ns(db_ns).use_db(db_db).await?;
+    db.use_ns(&config.surrealdb_ns).use_db(&config.surrealdb_db).await?;
     
     // Define schema
     db.query(
