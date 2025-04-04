@@ -10,32 +10,38 @@ core utility for multi-tenancy saas projects with go&amp;nginx
 This project implements a tenant service using Rust, SurrealDB, and Kubernetes, with Terraform for infrastructure management.
 
 ## Project Structure
-
-tenant-service/
-├── go.mod                        # Go module definition
-├── go.sum                        # Go dependencies checksum
-├── cmd/                          # Command line applications
-│   └── server/                   # Main server application
-│       └── main.go               # Server entrypoint
-├── internal/                     # Private application code
-│   ├── api/                      # API handlers and routes
-│   ├── models/                   # Data models
-│   └── services/                 # Business logic
-├── pkg/                          # Public packages
-│   └── tenant/                   # Tenant management package
-├── terraform/                    # Terraform configuration
-│   ├── main.tf                   # Main Terraform configuration
-│   ├── variables.tf              # Variable definitions
-│   └── secrets/                  # Environment-specific variables
-│       ├── template.tfvars       # Template for environment variables
-│       ├── dev.tfvars            # Development environment variables
-│       └── prod.tfvars           # Production environment variables
-├── k8s/                          # Kubernetes configuration
-│   ├── namespace.yaml            # Namespace definition
-│   ├── deployment.yaml           # Deployment configuration
-│   └── service.yaml              # Service configuration
-└── scripts/                      # Utility scripts
-    └── tenant-service.sh         # All-in-one management script
+```
+tenancyship/
+├── db-service/                   # SurrealDB service with Rust/Axum
+│   ├── src/                      # Rust source code
+│   ├── Cargo.toml               # Rust dependencies
+│   └── Cargo.lock               # Rust lockfile
+├── tenant-service/              # Go tenant management service
+│   ├── go.mod                   # Go module definition
+│   ├── go.sum                   # Go dependencies checksum
+│   ├── cmd/                     # Command line applications
+│   │   └── server/             # Main server application
+│   │       └── main.go         # Server entrypoint
+│   ├── internal/               # Private application code
+│   │   ├── api/               # API handlers and routes
+│   │   ├── models/            # Data models
+│   │   └── services/          # Business logic
+│   └── pkg/                    # Public packages
+│       └── tenant/            # Tenant management package
+├── terraform/                  # Infrastructure as code
+│   ├── main.tf                # Main Terraform configuration
+│   ├── variables.tf           # Variable definitions
+│   └── secrets/               # Environment-specific variables
+│       ├── template.tfvars    # Template for environment variables
+│       ├── dev.tfvars         # Development environment variables
+│       └── prod.tfvars        # Production environment variables
+├── k8s/                       # Kubernetes manifests
+│   ├── namespace.yaml         # Namespace definition
+│   ├── deployment.yaml        # Deployment configuration
+│   └── service.yaml          # Service configuration
+└── scripts/                   # Utility scripts
+    └── tenant-service.sh      # All-in-one management script
+```
 
 ## Prerequisites
 
