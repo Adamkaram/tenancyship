@@ -9,6 +9,22 @@ set -e  # Exit immediately if a command exits with a non-zero status
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Common validation function
+function validate_env {
+    local ENV=$1
+    if [ "$ENV" != "dev" ] && [ "$ENV" != "prod" ]; then
+        echo "Invalid environment. Use 'dev' or 'prod'"
+        exit 1
+    fi
+}
+
+# Get namespace from environment
+function get_namespace {
+    local ENV=$1
+    local VARS_FILE="$PROJECT_ROOT/terraform/secrets/${ENV}.tfvars"
+    grep 'k8s_namespace' "$VARS_FILE" | cut -d '=' -f2 | tr -d ' "'
+}
+
 # Display help message
 function show_help {
     echo "Tenant Service Management Tool"
@@ -30,11 +46,15 @@ function show_help {
     echo "  logs <env>              - View tenant service logs"
     echo "    <env>: dev or prod"
     echo ""
+    echo "  ssl-status <env>        - Check SSL certificates status"
+    echo "    <env>: dev or prod"
+    echo ""
     echo "Examples:"
     echo "  $0 deploy dev           - Deploy to development environment"
     echo "  $0 deploy prod destroy  - Destroy production infrastructure"
     echo "  $0 install              - Install required tools"
     echo "  $0 status dev           - Check status of development deployment"
+    echo "  $0 ssl-status prod      - Check SSL certificates in production"
     exit 1
 }
 
@@ -84,24 +104,17 @@ function install_tools {
 
 # Deploy/manage infrastructure
 function deploy_infrastructure {
-    ENV=$1
-    ACTION=${2:-apply}
-
-    # Validate environment
-    if [ "$ENV" != "dev" ] && [ "$ENV" != "prod" ]; then
-        echo "Invalid environment. Use 'dev' or 'prod'"
-        exit 1
-    fi
-
-    # Validate action
-    if [ "$ACTION" != "apply" ] && [ "$ACTION" != "plan" ] && [ "$ACTION" != "destroy" ]; then
-        echo "Invalid action. Use 'apply', 'plan', or 'destroy'"
-        exit 1
-    fi
-
-    VARS_FILE="$PROJECT_ROOT/terraform/secrets/${ENV}.tfvars"
+    local ENV=$1
+    local ACTION=${2:-apply}
     
-    # Check if vars file exists
+    validate_env "$ENV"
+
+    if [ "$ACTION" != "apply" ] && [ "$ACTION" != "plan" ] && [ "$ACTION" != "destroy" ]; then
+        echo "Invalid action. Use 'apply', 'plan', or destroy"
+        exit 1
+    fi
+
+    local VARS_FILE="$PROJECT_ROOT/terraform/secrets/${ENV}.tfvars"
     if [ ! -f "$VARS_FILE" ]; then
         echo "Error: Variables file $VARS_FILE not found."
         echo "Please create it based on the template or run: $0 setup $ENV"
@@ -126,40 +139,99 @@ function deploy_infrastructure {
         terraform plan -var-file="secrets/${ENV}.tfvars" -out=tfplan
         echo "Plan saved to tfplan. To apply, run: cd terraform && terraform apply tfplan"
     else
-        terraform apply -var-file="secrets/${ENV}.tfvars"
+        terraform apply -var-file="secrets/${ENV}.tfvars" && apply_k8s_configs "$ENV"
+    fi
+}
+
+# Apply Kubernetes configurations
+function apply_k8s_configs {
+    local ENV=$1
+    local NAMESPACE=$(get_namespace "$ENV")
+
+    echo "Applying Kubernetes configurations for namespace: $NAMESPACE"
+    
+    # Create necessary directories if they don't exist
+    mkdir -p "$PROJECT_ROOT/nginx/lua"
+    
+    # Create Nginx and Lua configurations if they don't exist
+    if [ ! -f "$PROJECT_ROOT/nginx/nginx.conf" ]; then
+        echo "Creating Nginx configuration..."
+        cat > "$PROJECT_ROOT/nginx/nginx.conf" << 'EOF'
+# Paste the nginx.conf content here (from the previous response)
+EOF
     fi
 
-    # If apply was successful, apply k8s configs
-    if [ "$ACTION" = "apply" ] && [ $? -eq 0 ]; then
-        echo "Applying Kubernetes configurations..."
-        # Get namespace from the variables file
-        NAMESPACE=$(grep 'k8s_namespace' "$VARS_FILE" | cut -d '=' -f2 | tr -d ' "')
-        
-        kubectl apply -f "$PROJECT_ROOT/k8s/namespace.yaml"
-        
-        # Apply deployment and service with the correct namespace
-        sed "s/\${k8s_namespace}/$NAMESPACE/g" "$PROJECT_ROOT/k8s/deployment.yaml" | kubectl apply -f -
-        sed "s/\${k8s_namespace}/$NAMESPACE/g" "$PROJECT_ROOT/k8s/service.yaml" | kubectl apply -f -
-        
-        echo "Deployment to $ENV environment complete!"
+    if [ ! -f "$PROJECT_ROOT/nginx/lua/ssl_automation.lua" ]; then
+        echo "Creating SSL automation Lua script..."
+        cat > "$PROJECT_ROOT/nginx/lua/ssl_automation.lua" << 'EOF'
+# Paste the ssl_automation.lua content here (from the previous response)
+EOF
     fi
+
+    if [ ! -f "$PROJECT_ROOT/nginx/lua/tenant_resolver.lua" ]; then
+        echo "Creating tenant resolver Lua script..."
+        cat > "$PROJECT_ROOT/nginx/lua/tenant_resolver.lua" << 'EOF'
+# Paste the tenant_resolver.lua content here (from the previous response)
+EOF
+    fi
+
+    # Apply base Kubernetes configurations
+    echo "Applying base Kubernetes configurations..."
+    kubectl apply -f "$PROJECT_ROOT/k8s/namespace.yaml"
+    
+    # Create ConfigMaps for Nginx and Lua scripts
+    echo "Creating ConfigMaps for Nginx and Lua scripts..."
+    kubectl create configmap nginx-config \
+        --from-file=nginx.conf="$PROJECT_ROOT/nginx/nginx.conf" \
+        -n "$NAMESPACE" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    kubectl create configmap lua-scripts \
+        --from-file="$PROJECT_ROOT/nginx/lua/" \
+        -n "$NAMESPACE" \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # Apply persistent volume claims
+    echo "Applying persistent volume claims..."
+    kubectl apply -f "$PROJECT_ROOT/k8s/persistent-volumes.yaml"
+
+    # Apply deployments
+    echo "Applying deployments..."
+    # Replace namespace placeholder in deployment files
+    for file in "$PROJECT_ROOT"/k8s/*deployment.yaml; do
+        sed "s/\${k8s_namespace}/$NAMESPACE/g" "$file" | kubectl apply -f -
+    done
+
+    # Apply services
+    echo "Applying services..."
+    for file in "$PROJECT_ROOT"/k8s/*service.yaml; do
+        sed "s/\${k8s_namespace}/$NAMESPACE/g" "$file" | kubectl apply -f -
+    done
+
+    # Wait for deployments to be ready
+    echo "Waiting for deployments to be ready..."
+    kubectl wait --for=condition=available --timeout=300s deployment/tenant-service -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/nginx-ssl-proxy -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/redis -n "$NAMESPACE"
+
+    # Show deployment status
+    echo -e "\nDeployment Status:"
+    kubectl get pods -n "$NAMESPACE"
+    echo -e "\nServices:"
+    kubectl get services -n "$NAMESPACE"
 }
 
 # Set up project for an environment
 function setup_environment {
-    ENV=$1
-    
-    # Validate environment
-    if [ "$ENV" != "dev" ] && [ "$ENV" != "prod" ]; then
-        echo "Invalid environment. Use 'dev' or 'prod'"
-        exit 1
-    fi
+    local ENV=$1
+    validate_env "$ENV"
     
     echo "Setting up $ENV environment..."
     
     # Create necessary directories if they don't exist
     mkdir -p "$PROJECT_ROOT/terraform/secrets"
     mkdir -p "$PROJECT_ROOT/k8s"
+    mkdir -p "$PROJECT_ROOT/nginx/lua"
     
     # Use template.tfvars to create the environment file if it doesn't exist
     TEMPLATE_FILE="$PROJECT_ROOT/terraform/secrets/template.tfvars"
@@ -197,59 +269,21 @@ EOF
 
 # Check deployment status
 function check_status {
-    ENV=$1
+    local ENV=$1
+    validate_env "$ENV"
     
-    # Validate environment
-    if [ "$ENV" != "dev" ] && [ "$ENV" != "prod" ]; then
-        echo "Invalid environment. Use 'dev' or 'prod'"
-        exit 1
-    fi
-    
-    # Get namespace from the variables file
-    VARS_FILE="$PROJECT_ROOT/terraform/secrets/${ENV}.tfvars"
-    if [ ! -f "$VARS_FILE" ]; then
-        echo "Error: Variables file $VARS_FILE not found."
-        exit 1
-    fi
-    
-    NAMESPACE=$(grep 'k8s_namespace' "$VARS_FILE" | cut -d '=' -f2 | tr -d ' "')
-    
-    echo "Checking status for $ENV environment (namespace: $NAMESPACE)..."
-    echo ""
-    echo "=== Pods ==="
-    kubectl get pods -n "$NAMESPACE"
-    echo ""
-    echo "=== Services ==="
-    kubectl get services -n "$NAMESPACE"
-    echo ""
-    echo "=== Deployments ==="
-    kubectl get deployments -n "$NAMESPACE"
-    echo ""
-    echo "=== Secrets ==="
-    kubectl get secrets -n "$NAMESPACE"
+    local NAMESPACE=$(get_namespace "$ENV")
+    echo "Status for $ENV environment (namespace: $NAMESPACE):"
+    kubectl get pods,services,deployments -n "$NAMESPACE"
 }
 
 # View logs
 function view_logs {
-    ENV=$1
+    local ENV=$1
+    validate_env "$ENV"
     
-    # Validate environment
-    if [ "$ENV" != "dev" ] && [ "$ENV" != "prod" ]; then
-        echo "Invalid environment. Use 'dev' or 'prod'"
-        exit 1
-    fi
-    
-    # Get namespace from the variables file
-    VARS_FILE="$PROJECT_ROOT/terraform/secrets/${ENV}.tfvars"
-    if [ ! -f "$VARS_FILE" ]; then
-        echo "Error: Variables file $VARS_FILE not found."
-        exit 1
-    fi
-    
-    NAMESPACE=$(grep 'k8s_namespace' "$VARS_FILE" | cut -d '=' -f2 | tr -d ' "')
-    
-    # Get the pod name
-    POD_NAME=$(kubectl get pods -n "$NAMESPACE" -l app=tenant-service -o jsonpath="{.items[0].metadata.name}")
+    local NAMESPACE=$(get_namespace "$ENV")
+    local POD_NAME=$(kubectl get pods -n "$NAMESPACE" -l app=tenant-service -o jsonpath="{.items[0].metadata.name}")
     
     if [ -z "$POD_NAME" ]; then
         echo "No tenant-service pods found in namespace $NAMESPACE"
@@ -258,6 +292,24 @@ function view_logs {
     
     echo "Viewing logs for pod $POD_NAME in namespace $NAMESPACE..."
     kubectl logs -f "$POD_NAME" -n "$NAMESPACE"
+}
+
+# Check SSL status
+function check_ssl_status {
+    local ENV=$1
+    validate_env "$ENV"
+    
+    local NAMESPACE=$(get_namespace "$ENV")
+    
+    echo "SSL Status for $ENV environment (namespace: $NAMESPACE):"
+    echo -e "\nNginx Pods:"
+    kubectl get pods -n "$NAMESPACE" -l app=nginx-ssl-proxy
+    
+    echo -e "\nSSL Certificates:"
+    kubectl exec -n "$NAMESPACE" -l app=nginx-ssl-proxy -c nginx -- ls -l /etc/nginx/ssl/ 2>/dev/null || echo "No certificates found"
+    
+    echo -e "\nSSL-related logs:"
+    kubectl logs -n "$NAMESPACE" -l app=nginx-ssl-proxy -c nginx --tail=20 | grep -i "ssl\|cert\|domain" || echo "No SSL-related logs found"
 }
 
 # Main command processing
@@ -299,6 +351,13 @@ case $COMMAND in
             show_help
         fi
         view_logs "$1"
+        ;;
+    ssl-status)
+        if [ $# -lt 1 ]; then
+            echo "Error: Missing environment parameter"
+            show_help
+        fi
+        check_ssl_status "$1"
         ;;
     *)
         echo "Unknown command: $COMMAND"

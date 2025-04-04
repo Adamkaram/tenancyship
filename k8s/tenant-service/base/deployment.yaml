@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-service
+  namespace: ${k8s_namespace}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tenant-service
+  template:
+    metadata:
+      labels:
+        app: tenant-service
+    spec:
+      containers:
+      - name: tenant-service
+        image: tenant-service:latest
+        env:
+        - name: ENVIRONMENT_TYPE
+          value: "kubernetes"
+        volumeMounts:
+        - name: surrealdb-creds
+          mountPath: "/mnt/secrets/surrealdb-creds"
+          readOnly: true
+      volumes:
+      - name: surrealdb-creds
+        secret:
+          secretName: surrealdb-creds 

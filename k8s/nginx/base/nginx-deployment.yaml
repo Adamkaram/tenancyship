@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-ssl-proxy
+  namespace: ${k8s_namespace}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-ssl-proxy
+  template:
+    metadata:
+      labels:
+        app: nginx-ssl-proxy
+    spec:
+      containers:
+      - name: nginx
+        image: openresty/openresty:alpine-fat
+        ports:
+        - containerPort: 80
+        - containerPort: 443
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: lua-scripts
+          mountPath: /etc/nginx/lua
+        - name: ssl-data
+          mountPath: /etc/nginx/ssl
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: lua-scripts
+        configMap:
+          name: lua-scripts
+      - name: ssl-data
+        persistentVolumeClaim:
+          claimName: ssl-data 

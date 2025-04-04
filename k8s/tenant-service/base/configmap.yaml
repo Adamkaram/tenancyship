@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-service-config
+data:
+  environment_type: "development"
+  log_level: "info"
+  api_version: "v1" 

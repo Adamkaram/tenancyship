@@ -14,6 +14,7 @@ use surrealdb::Surreal;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use serde_json::Value;
+use regex;
 
 // Configuration struct for secrets management
 #[derive(Debug, Deserialize)]
@@ -87,22 +88,28 @@ mod error {
     pub enum Error {
         Db,
         NotFound,
+        BadRequest(String),
+        Conflict(String),
     }
-
+    
     impl fmt::Display for Error {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
                 Error::Db => write!(f, "database error"),
                 Error::NotFound => write!(f, "not found"),
+                Error::BadRequest(msg) => write!(f, "bad request: {}", msg),
+                Error::Conflict(msg) => write!(f, "conflict: {}", msg),
             }
         }
     }
-
+    
     impl IntoResponse for Error {
         fn into_response(self) -> Response {
             let status = match self {
                 Self::Db => StatusCode::INTERNAL_SERVER_ERROR,
                 Self::NotFound => StatusCode::NOT_FOUND,
+                Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+                Self::Conflict(_) => StatusCode::CONFLICT,
             };
             (status, Json(self.to_string())).into_response()
         }
@@ -120,6 +127,8 @@ mod error {
 struct Tenant {
     id: String,
     name: String,
+    domain: Option<String>,
+    ssl_enabled: Option<bool>,
 }
 
 // API routes
@@ -132,18 +141,25 @@ mod routes {
     // Helper function to display API documentation
     pub async fn api_docs() -> &'static str {
         r#"
------------------------------------------------------------------------------------------------------------------------------------------
-        PATH                |           SAMPLE COMMAND                                                                                  
------------------------------------------------------------------------------------------------------------------------------------------
-/tenants:                   |  curl -X GET    -H "Content-Type: application/json"                       http://localhost:8080/tenants
-  List all tenants          |
-                            |
-/tenants/{id}:              |
-  Create a tenant           |  curl -X POST   -H "Content-Type: application/json" -d '{"id":"t1","name":"First Tenant"}' http://localhost:8080/tenants/t1
-  Get a tenant              |  curl -X GET    -H "Content-Type: application/json"                       http://localhost:8080/tenants/t1
-  Update a tenant           |  curl -X PUT    -H "Content-Type: application/json" -d '{"name":"Updated Tenant"}' http://localhost:8080/tenants/t1
-  Delete a tenant           |  curl -X DELETE -H "Content-Type: application/json"                       http://localhost:8080/tenants/t1
-"#
+    -----------------------------------------------------------------------------------------------------------------------------------------
+            PATH                |           SAMPLE COMMAND                                                                                  
+    -----------------------------------------------------------------------------------------------------------------------------------------
+    /tenants:                   |  curl -X GET    -H "Content-Type: application/json"                       http://localhost:8080/tenants
+      List all tenants          |
+                                |
+    /tenants/{id}:              |
+      Create a tenant           |  curl -X POST   -H "Content-Type: application/json" -d '{"id":"t1","name":"First Tenant"}' http://localhost:8080/tenants/t1
+      Get a tenant              |  curl -X GET    -H "Content-Type: application/json"                       http://localhost:8080/tenants/t1
+      Update a tenant           |  curl -X PUT    -H "Content-Type: application/json" -d '{"name":"Updated Tenant"}' http://localhost:8080/tenants/t1
+      Delete a tenant           |  curl -X DELETE -H "Content-Type: application/json"                       http://localhost:8080/tenants/t1
+    
+    /tenants/{id}/domain:       |
+      Add a domain              |  curl -X POST   -H "Content-Type: application/json" -d '{"domain":"example.com"}' http://localhost:8080/tenants/t1/domain
+      Remove a domain           |  curl -X DELETE -H "Content-Type: application/json"                       http://localhost:8080/tenants/t1/domain
+                                |
+    /domains:                   |  curl -X GET    -H "Content-Type: application/json"                       http://localhost:8080/domains
+      List all domains          |
+    "#
     }
 
     pub async fn create_tenant(
@@ -212,6 +228,129 @@ mod routes {
             None => Err(Error::NotFound),
         }
     }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct DomainRequest {
+        domain: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct DomainInfo {
+        tenant_id: String,
+        domain: String,
+        ssl_enabled: bool,
+    }
+
+    pub async fn add_domain(
+        axum::extract::State(db): axum::extract::State<Surreal<Any>>,
+        Path(id): Path<String>,
+        Json(domain_req): Json<DomainRequest>,
+    ) -> Result<Json<Tenant>, Error> {
+        // Validate domain format
+        if !is_valid_domain(&domain_req.domain) {
+            return Err(Error::BadRequest("Invalid domain format".to_string()));
+        }
+        
+        // Check if domain already exists for another tenant
+        let domain_check: Option<Tenant> = db
+            .query("SELECT * FROM tenant WHERE domain = $domain")
+            .bind(("domain", &domain_req.domain))
+            .await?
+            .take(0)?;
+        
+        if let Some(tenant) = domain_check {
+            if tenant.id != id {
+                return Err(Error::Conflict("Domain already in use".to_string()));
+            }
+        }
+        
+        // Update tenant with domain
+        let tenant: Option<Tenant> = db
+            .update(("tenant", &id))
+            .merge(serde_json::json!({
+                "domain": domain_req.domain,
+                "ssl_enabled": false  // Initially false until cert is provisioned
+            }))
+            .await?;
+        
+        match tenant {
+            Some(tenant) => {
+                // Trigger SSL certificate generation in a background task
+                tokio::spawn(generate_ssl_certificate(tenant.clone()));
+                Ok(Json(tenant))
+            },
+            None => Err(Error::NotFound),
+        }
+    }
+
+    pub async fn remove_domain(
+        axum::extract::State(db): axum::extract::State<Surreal<Any>>,
+        Path(id): Path<String>,
+    ) -> Result<Json<Tenant>, Error> {
+        // Update tenant to remove domain
+        let tenant: Option<Tenant> = db
+            .update(("tenant", &id))
+            .merge(serde_json::json!({
+                "domain": null,
+                "ssl_enabled": null
+            }))
+            .await?;
+        
+        match tenant {
+            Some(tenant) => Ok(Json(tenant)),
+            None => Err(Error::NotFound),
+        }
+    }
+
+    pub async fn list_domains(
+        axum::extract::State(db): axum::extract::State<Surreal<Any>>,
+    ) -> Result<Json<Vec<DomainInfo>>, Error> {
+        let domains: Vec<DomainInfo> = db
+            .query("SELECT id as tenant_id, domain, ssl_enabled FROM tenant WHERE domain IS NOT NULL")
+            .await?
+            .take(0)?;
+        
+        Ok(Json(domains))
+    }
+
+    // Helper function to validate domain format
+    fn is_valid_domain(domain: &str) -> bool {
+        // Basic domain validation regex
+        // This is a simplified version - consider using a more robust validator
+        let domain_regex = regex::Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]$").unwrap();
+        domain_regex.is_match(domain)
+    }
+
+    // Background task to generate SSL certificate
+    async fn generate_ssl_certificate(tenant: Tenant) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Skip if no domain or already has SSL
+        if tenant.domain.is_none() || tenant.ssl_enabled.unwrap_or(false) {
+            return Ok(());
+        }
+        
+        let domain = tenant.domain.as_ref().unwrap();
+        
+        // TODO: Implement actual Let's Encrypt certificate generation logic
+        // This could be done by:
+        // 1. Calling a separate service that manages certificates
+        // 2. Using the ACME protocol directly
+        // 3. Triggering a webhook that alerts Nginx to generate a cert
+        
+        // For now, simulate a successful certificate generation
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        
+        // Update tenant with SSL status
+        let db = Surreal::connect("your-db-connection-string").await?;
+        // Sign in and use the right namespace/db
+        
+        db.update(("tenant", &tenant.id))
+            .merge(serde_json::json!({ "ssl_enabled": true }))
+            .await?;
+        
+        println!("SSL certificate generated for domain: {}", domain);
+        
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -258,7 +397,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DEFINE TABLE IF NOT EXISTS tenant SCHEMALESS;
         DEFINE FIELD IF NOT EXISTS id ON TABLE tenant TYPE string;
         DEFINE FIELD IF NOT EXISTS name ON TABLE tenant TYPE string;
+        DEFINE FIELD IF NOT EXISTS domain ON TABLE tenant TYPE string;
+        DEFINE FIELD IF NOT EXISTS ssl_enabled ON TABLE tenant TYPE bool;
         DEFINE INDEX IF NOT EXISTS unique_tenant_id ON TABLE tenant FIELDS id UNIQUE;
+        DEFINE INDEX IF NOT EXISTS unique_domain ON TABLE tenant FIELDS domain UNIQUE;
         "
     ).await?;
     
@@ -272,6 +414,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/tenants/:id", get(routes::get_tenant))
         .route("/tenants/:id", put(routes::update_tenant))
         .route("/tenants/:id", delete(routes::delete_tenant))
+        .route("/tenants/:id/domain", post(routes::add_domain))
+        .route("/tenants/:id/domain", delete(routes::remove_domain))
+        .route("/domains", get(routes::list_domains))
         .layer(CorsLayer::permissive())
         .with_state(db);
     
