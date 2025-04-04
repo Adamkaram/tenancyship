@@ -12,7 +12,15 @@ NC='\033[0m' # No Color
 
 # Define paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Handle case when script is called via symlink
+if [[ "$(basename "${BASH_SOURCE[0]}")" == "manage" ]]; then
+    # When called as ./manage, we're in the project root already
+    PROJECT_ROOT="$(pwd)"
+else
+    # When called directly from scripts/ directory
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 
 # Helper functions
 print_header() {
@@ -373,7 +381,35 @@ run_local_app() {
             ;;
         2)
             print_header "Running with podman-compose..."
+            
+            # Check if virtual environment exists
+            if [ ! -d ".venv" ]; then
+                print_header "Virtual environment not found, creating one..."
+                # Install uv if not already installed
+                if ! command -v uv &> /dev/null; then
+                    print_header "Installing/checking uv package manager..."
+                    curl -LsSf https://astral.sh/uv/install.sh | sh
+                fi
+                
+                # Create virtual environment
+                uv venv
+            fi
+            
+            # Activate the virtual environment
+            print_header "Activating virtual environment..."
+            source .venv/bin/activate
+            
+            # Check if podman-compose is installed
+            if ! command -v podman-compose &> /dev/null; then
+                print_header "Installing podman-compose..."
+                uv pip install podman-compose
+            fi
+            
+            # Run podman-compose
             podman-compose up --build
+            
+            # Deactivate the virtual environment
+            deactivate
             ;;
         *)
             print_error "Invalid choice. Please enter 1 or 2."
@@ -402,19 +438,65 @@ run_rust_service() {
     cargo run
 }
 
-# Function to deploy locally using docker-compose
+# Function to deploy locally using podman-compose
 deploy_local() {
-    print_header "Deploying locally using docker-compose"
+    print_header "Deploying locally using Podman containers"
     cd "$PROJECT_ROOT"
+    
+    # Check if docker-compose.yml or similar files exist
+    if [ ! -f "$PROJECT_ROOT/docker-compose.yml" ] && [ ! -f "$PROJECT_ROOT/compose.yaml" ] && [ ! -f "$PROJECT_ROOT/container-compose.yml" ]; then
+        print_warning "No compose file found (docker-compose.yml, compose.yaml, or container-compose.yml)"
+        read -p "Would you like to create a basic docker-compose.yml file? (y/n): " create_file
+        
+        if [ "$create_file" = "y" ]; then
+            print_header "Creating a basic docker-compose.yml file..."
+            cat > "$PROJECT_ROOT/docker-compose.yml" << 'EOF'
+version: '3.8'
+
+services:
+  main-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - TENANT_SERVICE_URL=http://tenant-service:8080
+    depends_on:
+      - tenant-service
+
+  tenant-service:
+    build:
+      context: ./tenant-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+
+networks:
+  default:
+    driver: bridge
+EOF
+            print_success "Created docker-compose.yml file"
+        else
+            print_error "Cannot continue without a compose file. Please create one manually."
+            return 1
+        fi
+    fi
     
     # Install uv if not already installed
     print_header "Installing/checking uv package manager..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    if ! command -v uv &> /dev/null; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+    fi
 
     # Create and activate a virtual environment
     print_header "Setting up virtual environment..."
-    uv venv
-    source .venv/bin/activate  # On Unix/macOS
+    if [ ! -d ".venv" ]; then
+        uv venv
+    fi
+    
+    # Explicitly activate the virtual environment
+    source .venv/bin/activate
 
     # Install podman-compose
     print_header "Installing podman-compose..."
@@ -422,13 +504,16 @@ deploy_local() {
 
     # Clean up existing containers and images
     print_header "Cleaning up existing containers and images..."
-    podman-compose down --volumes
+    podman-compose down --volumes || print_warning "No existing containers to clean up"
     podman system prune -f
 
     # Build and run with podman-compose
     print_header "Building and running with podman-compose..."
-    podman-compose build --no-cache
-    podman-compose up
+    podman-compose -f "$PROJECT_ROOT/docker-compose.yml" build --no-cache
+    podman-compose -f "$PROJECT_ROOT/docker-compose.yml" up
+    
+    # Deactivate the virtual environment
+    deactivate
 }
 
 # PART 4: KUBERNETES MANAGEMENT FUNCTIONS
