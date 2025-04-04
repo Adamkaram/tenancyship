@@ -36,137 +36,209 @@ tenancyship/
 │       ├── dev.tfvars         # Development environment variables
 │       └── prod.tfvars        # Production environment variables
 ├── k8s/                       # Kubernetes manifests
-│   ├── namespace.yaml         # Namespace definition
-│   ├── deployment.yaml        # Deployment configuration
-│   └── service.yaml          # Service configuration
+│   ├── base/                  # Base configurations
+│   │   ├── namespace.yaml     # Namespace definition
+│   │   └── persistent-volumes.yaml # Persistent volume definitions
+│   ├── tenant-service/        # Tenant service configurations
+│   │   └── base/              # Base tenant service configs
+│   ├── nginx/                 # Nginx configurations
+│   │   └── base/              # Base nginx configs
+│   ├── redis/                 # Redis configurations
+│   │   └── base/              # Base redis configs
+│   └── overlays/              # Environment-specific configurations
+│       ├── dev/               # Development environment
+│       └── prod/              # Production environment
 └── scripts/                   # Utility scripts
-    └── tenant-service.sh      # All-in-one management script
+    └── all-in-one.sh          # All-in-one management script
 ```
 
 ## Prerequisites
 
-- Docker
+- Docker or Podman
 - Kubernetes cluster (or Minikube for local development)
 - Terraform
 - kubectl
-- Vault (optional, for enhanced secret management)
+- kustomize (installed automatically by the management script)
 
-## Setup
+## Setup and Management
 
-### 1. Install Required Tools
+This project includes a comprehensive all-in-one management script that handles all aspects of development, deployment, and management.
+
+### Quick Start
 
 ```bash
-sudo ./scripts/tenant-service.sh install
+# Make the script executable
+chmod +x scripts/all-in-one.sh
+
+# Create a convenient symlink
+ln -sf scripts/all-in-one.sh ./manage
+
+# Run the interactive menu
+./manage
 ```
 
-This will install Terraform, kubectl, and Vault on your system.
+### Interactive Menu
 
-### 2. Set Up Environment
+The management script provides an interactive menu system with the following options:
+
+1. **Development Environment**
+   - Deploy using Kustomize
+   - Deploy using Terraform + K8s
+   - Show Kubernetes resources
+   - Get pod logs
+   - Restart deployments
+   - Shell into a pod
+   - Check SSL certificates
+   - Clean up resources
+
+2. **Production Environment**
+   - Same options as development (with confirmation prompts for safety)
+
+3. **Local Development**
+   - Run application with Go or Podman
+   - Run Rust tenant service
+   - Deploy locally using docker-compose
+
+4. **Tools & Setup**
+   - Install required tools
+   - Set up development environment
+   - Set up production environment
+
+### Command Line Usage
+
+You can also use the script directly with commands:
 
 ```bash
-./scripts/tenant-service.sh setup dev  # For development
-# OR
-./scripts/tenant-service.sh setup prod  # For production
+# General syntax
+./manage <command> [options]
 ```
 
-This will create environment-specific variable files in `terraform/secrets/`. Edit these files to set your specific values for SurrealDB, Vault, and Kubernetes.
-
-### 3. Deploy the Infrastructure
+Common commands:
 
 ```bash
-./scripts/tenant-service.sh deploy dev  # For development
-# OR
-./scripts/tenant-service.sh deploy prod  # For production
+# Install required tools
+sudo ./manage install
+
+# Set up development environment
+./manage setup dev
+
+# Deploy to development environment
+./manage deploy dev
+
+# Deploy to development with Kustomize
+./manage kustomize dev
+
+# Run local application (Go or Podman)
+./manage run-local
+
+# Run Rust tenant service
+./manage run-rust
+
+# Deploy locally with docker-compose
+./manage deploy-local
+
+# Check status of deployments
+./manage status dev
+
+# View logs from pods
+./manage logs dev
+
+# Open shell in a pod
+./manage shell dev
+
+# Check SSL certificates
+./manage ssl-status dev
+
+# Restart deployments
+./manage restart dev
+
+# Clean up resources
+./manage cleanup dev
 ```
 
-This will:
-1. Initialize Terraform
-2. Apply the Terraform configuration with your environment variables
-3. Create the Kubernetes namespace, deployment, and service
+## Kubernetes Structure
 
-## Management Commands
+The Kubernetes configurations follow a Kustomize-based structure:
 
-The `tenant-service.sh` script provides a unified interface for common operations:
+- **Base**: Contains shared resources (namespace, persistent volumes)
+- **Component Directories**: Component-specific configurations:
+  - `tenant-service`: Main backend service
+  - `nginx`: Frontend proxy with SSL termination
+  - `redis`: Caching layer
+- **Overlays**: Environment-specific configurations
+  - `dev`: Development environment settings
+  - `prod`: Production environment settings with higher replica counts
 
-### Deployment Management
+## Local Development
 
-```bash
-# Deploy to an environment
-./scripts/tenant-service.sh deploy <env>
-
-# Plan changes without applying
-./scripts/tenant-service.sh deploy <env> plan
-
-# Destroy infrastructure
-./scripts/tenant-service.sh deploy <env> destroy
-```
-
-Where `<env>` is either `dev` or `prod`.
-
-### Status Checking
+For local development, you can use:
 
 ```bash
-# Check deployment status
-./scripts/tenant-service.sh status <env>
-```
+# Run the Go application directly
+./manage run-local
+# Select option 1 when prompted
 
-This shows the status of pods, services, deployments, and secrets in your environment.
+# Run with docker-compose/podman-compose
+./manage run-local
+# Select option 2 when prompted
 
-### Log Viewing
+# Run the Rust tenant service
+./manage run-rust
 
-```bash
-# View logs from the tenant service
-./scripts/tenant-service.sh logs <env>
+# Deploy locally with all services
+./manage deploy-local
 ```
 
 ## Secret Management
 
 This project uses a multi-layered approach to secret management:
 
-1. **Development**: Environment variables or `.env` files
+1. **Development**: Environment variables or ConfigMaps
 2. **Kubernetes**: Kubernetes Secrets mounted as files
-3. **Vault**: HashiCorp Vault for centralized secret management
-
-The application will automatically detect and use the appropriate method based on its environment.
+3. **Terraform**: Terraform variables for infrastructure secrets
 
 ## Customization
 
+### Adding New Components
+
+1. Create a new directory in `k8s/` for your component
+2. Add base manifests in a `base/` subdirectory
+3. Update overlays to include your component
+4. Deploy using `./manage kustomize dev`
+
 ### Adding New Environments
 
-1. Create a new environment file: `./scripts/tenant-service.sh setup <new-env>`
-2. Edit the generated file at `terraform/secrets/<new-env>.tfvars`
-3. Deploy to the new environment: `./scripts/tenant-service.sh deploy <new-env>`
-
-### Changing SurrealDB Configuration
-
-Edit your environment variables file (`terraform/secrets/<env>.tfvars`) and update:
-
-surrealdb_url = "wss://your-new-instance"
-surrealdb_user = "new-user"
-surrealdb_password = "new-password"
-surrealdb_ns = "new-namespace"
-surrealdb_db = "new-database"
-
-Then redeploy: `./scripts/tenant-service.sh deploy <env>`
-
-## Security Best Practices
-
-1. Never commit actual secrets to git
-2. Use different credentials for each environment
-3. Rotate secrets regularly
-4. Use strong passwords
-5. Consider a secrets management service in production
-6. Use encrypted communication
-7. Consider using Vault's dynamic secrets capabilities
+1. Create a new directory in `k8s/overlays/` for your environment
+2. Copy files from an existing environment as templates
+3. Set up Terraform variables: `./manage setup <new-env>`
+4. Deploy to the new environment: `./manage deploy <new-env>`
 
 ## Troubleshooting
 
-### Common Issues
+The management script includes built-in troubleshooting capabilities:
 
-1. **Connection to SurrealDB fails**: Check the SurrealDB URL and credentials in your environment file.
-2. **Kubernetes pods not starting**: Check the pod status and logs with `./scripts/tenant-service.sh status <env>` and `./scripts/tenant-service.sh logs <env>`.
-3. **Terraform errors**: Ensure your `.tfvars` file has all required variables.
+```bash
+# Check deployment status
+./manage status dev
 
-For more detailed troubleshooting, check the logs of the specific components.
+# View pod logs
+./manage logs dev
+
+# Shell into a pod for debugging
+./manage shell dev
+```
+
+Common issues and solutions:
+
+1. **Connection to database fails**: Check the database credentials in your ConfigMap or environment variables
+2. **Kubernetes pods not starting**: Check pod status and logs with `./manage status dev` and `./manage logs dev`
+3. **Terraform errors**: Ensure your `.tfvars` file has all required variables
+
+For more detailed troubleshooting, check the README files in each component directory:
+- `k8s/README.md`: Overview of Kubernetes structure
+- `k8s/tenant-service/README.md`: Tenant service details
+- `k8s/nginx/README.md`: Nginx proxy details
+- `k8s/redis/README.md`: Redis cache details
+- `scripts/README-all-in-one.md`: Detailed usage of the management script
 
 
