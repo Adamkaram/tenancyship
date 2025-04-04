@@ -1,6 +1,9 @@
 # tenancyship
 core utility for multi-tenancy saas projects with go&amp;nginx
 
+![Uploading ChatGPT Image Apr 4, 2025, 09_45_53 PM.png…]()
+
+
 1- db service with rust axum and surrealdb
 2- go in general
 3- podman
