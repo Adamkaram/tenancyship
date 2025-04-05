@@ -4,7 +4,9 @@ A powerful, enterprise-grade multi-tenancy toolkit for modern SaaS applications,
 
 ![Tenancyship Architecture](https://github.com/user-attachments/assets/a33e45bf-c1b8-41a2-aa23-9f0a272d4ae4)
 
-## Core Features
+## Core Features![ChatGPT Image Apr 5, 2025, 08_02_52 AM](https://github.com/user-attachments/assets/2b044276-c36b-412b-a45a-e8a5bba9c769)
+![ChatGPT Image Apr 5, 2025, 08_01_11 AM](https://github.com/user-attachments/assets/61f2ccaa-a696-4b0e-9d79-58737dc0a2b9)
+
 
 ### 🔒 Secure Tenant Isolation
 - Database-per-tenant architecture
