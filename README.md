@@ -4,6 +4,7 @@ A powerful, enterprise-grade multi-tenancy toolkit for modern SaaS applications,
 
 ![ChatGPT Image Apr 5, 2025, 08_02_52 AM](https://github.com/user-attachments/assets/2b044276-c36b-412b-a45a-e8a5bba9c769)
 
+![ChatGPT Image Apr 5, 2025, 08_08_46 AM](https://github.com/user-attachments/assets/58336d57-2b7f-434a-ba66-28b5891a2ae8)
 
 ## Core Features
 
