@@ -2,7 +2,7 @@
 
 A powerful, enterprise-grade multi-tenancy toolkit for modern SaaS applications, featuring a robust microservices architecture.
 
-![ChatGPT Image Apr 5, 2025, 08_02_52 AM](https://github.com/user-attachments/assets/2b044276-c36b-412b-a45a-e8a5bba9c769)
+
 
 ![New Project](https://github.com/user-attachments/assets/52c23150-37f3-40d0-b4a2-f9e5f35b729b)
 
